@@ -1,0 +1,27 @@
+# Dependency directories
+node_modules/
+
+# Build output
+dist/
+
+# Temporary files
+.tmp/
+*.tmp
+
+# VSCode settings
+.vscode/
+
+# Lock files (optional, but often ignored)
+package-lock.json
+
+# Webpack statistics
+webpack.statistics.dev.html
+webpack.statistics.prod.html
+
+# IDE/OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs and debug files
+*.log
+*.vsix

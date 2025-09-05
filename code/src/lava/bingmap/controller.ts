@@ -165,9 +165,8 @@ var capability = {
   }
 }
 
-function parameter(map: Map, fmt: IMapFormat, div: HTMLDivElement): Microsoft.Maps.IMapLoadOptions {
+export function parameter(map: Map, fmt: IMapFormat, div: HTMLDivElement): Microsoft.Maps.IMapLoadOptions {
   const para = {
-    credentials: 'Your key here',
     showDashboard: false,
     showTermsLink: false,
     showScalebar: fmt.scale || false,
@@ -372,11 +371,15 @@ export class Controller {
     this._handler1 = Events.addHandler(map, 'viewchange', () => this._viewChange(false));
     this._handler2 = Events.addHandler(map, 'viewchangeend', () => this._viewChange(true));
     this._handler3 = Events.addHandler(map, 'mapresize', () => this._resize());
+    // Scoped suppression: hide the invalid credentials banner inside the map root only
+    this._setupBannerSuppress(map);
     return map;
   }
   private _handler1: Microsoft.Maps.IHandlerId;
   private _handler2: Microsoft.Maps.IHandlerId;
   private _handler3: Microsoft.Maps.IHandlerId;
+  private _bannerObserver: MutationObserver;
+  private _bannerObserverDoc: MutationObserver;
 
   private _viewChange(end = false) {
     let zoom = this._map.getZoom();
@@ -384,6 +387,79 @@ export class Controller {
       l.transform && l.transform(this, this._zoom, end);
     }
     this._zoom = zoom;
+  }
+
+  private _setupBannerSuppress(map: Map) {
+    try {
+      if (!map || !map.getRootElement) return;
+      const root = map.getRootElement();
+      if (!root) return;
+      const rootRect = root.getBoundingClientRect();
+      // Disconnect any previous observer (on remap)
+      if (this._bannerObserver) {
+        this._bannerObserver.disconnect();
+      }
+      if (this._bannerObserverDoc) {
+        this._bannerObserverDoc.disconnect();
+      }
+      const hideByPortalLink = (container: HTMLElement) => {
+        const anchors = Array.from(container.querySelectorAll('a[href*="bingmapsportal"], a[href*="bingmapsportal.com"]')) as HTMLElement[];
+        anchors.forEach(a => {
+          let target: HTMLElement = a;
+          // ascend a few levels to hide the banner container but not the map root
+          for (let i = 0; i < 3 && target.parentElement; i++) {
+            const parent = target.parentElement as HTMLElement;
+            const r = parent.getBoundingClientRect();
+            // stop if we reached something as large as most of the map
+            if (r.width > rootRect.width * 0.95 && r.height > rootRect.height * 0.6) break;
+            if (parent === root) break;
+            target = parent;
+          }
+          target.style.display = 'none';
+          target.setAttribute('data-bing-banner-hidden', '1');
+        });
+      };
+      // Initial pass
+      hideByPortalLink(root);
+      // Sometimes the banner is attached outside of the root; scan body as a best-effort
+      if (document && document.body) {
+        hideByPortalLink(document.body);
+      }
+      // Observe dynamic insertions within the map root only
+      this._bannerObserver = new MutationObserver(muts => {
+        for (const m of muts) {
+          if (m.type === 'childList') {
+            m.addedNodes.forEach(node => {
+              if (node instanceof HTMLElement) {
+                hideByPortalLink(node);
+              }
+            });
+          }
+        }
+      });
+      this._bannerObserver.observe(root, { childList: true, subtree: true });
+      // Temporary observer on body to catch late banner injections outside of map root
+      if (document && document.body) {
+        this._bannerObserverDoc = new MutationObserver(muts => {
+          for (const m of muts) {
+            if (m.type === 'childList') {
+              m.addedNodes.forEach(node => {
+                if (node instanceof HTMLElement) {
+                  hideByPortalLink(node);
+                }
+              });
+            }
+          }
+        });
+        this._bannerObserverDoc.observe(document.body, { childList: true, subtree: true });
+        // auto-stop after a short period to avoid overhead
+        setTimeout(() => {
+          try { this._bannerObserverDoc && this._bannerObserverDoc.disconnect(); } catch {}
+        }, 8000);
+      }
+    } catch (_) {
+      // best-effort; ignore failures
+    }
   }
 
   private _zoom: number;
